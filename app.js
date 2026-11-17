@@ -18,7 +18,7 @@ const store = { get(k, d) { try { const v = localStorage.getItem(k); return v ==
 
 const S = {
   user: null, page: 'dash', ready: false, offline: false,
-  accts: [], items: [], trips: [], bal: [], monthly: [], cat: [], budgets: [], cards: [], subs: [], insts: [], fx: [], recent: [],
+  accts: [], goals: [], quick: [], quickOk: true, items: [], trips: [], bal: [], monthly: [], cat: [], budgets: [], cards: [], subs: [], insts: [], fx: [], recent: [],
   txs: [], txMonth: curMonth(), q: '', rm: curMonth(), sort: false, showOff: false,
   form: null, tf: null, legacy: { q: '', p: 0, rows: [], n: 0 }, msg: '', loginErr: '', pend: store.get('pend', [])
 };
@@ -76,8 +76,10 @@ async function load() {
   ]);
   const bad = r.find(x => x.error);
   if (bad) throw bad.error;
-  const k = ['accts', 'items', 'trips', 'bal', 'monthly', 'cat', 'budgets', 'cards', 'subs', 'insts', 'fx', 'recent'];
-  k.forEach((key, i) => { S[key] = r[i].data || []; });
+  const gx = await sb.from('goals').select('*').order('created_at'); S.goals = gx.error ? [] : gx.data || [];
+  const qx = await sb.from('quick_entries').select('*').order('sort_order'); S.quickOk = !qx.error; S.quick = qx.error ? [] : qx.data || [];
+  const k = ['accts', 'goals', 'quick', 'items', 'trips', 'bal', 'monthly', 'cat', 'budgets', 'cards', 'subs', 'insts', 'fx', 'recent'];
+  ['accts', 'items', 'trips', 'bal', 'monthly', 'cat', 'budgets', 'cards', 'subs', 'insts', 'fx', 'recent'].forEach((key, i) => { S[key] = r[i].data || []; });
   store.set('cache', Object.fromEntries(k.map(key => [key, S[key]])));
   S.offline = false;
   if (!S.cards.length) {
@@ -194,6 +196,7 @@ function addView() {
   const f = S.tf || (S.tf = newTf()), tr = f.type === '轉帳';
   const feeCur = acur(tr ? f.from : f.account);
   let h = '<div class="ph"><h2>' + (f.editId ? '編輯交易' : '記一筆') + '</h2></div><div class="form">';
+  if (S.quick.length && !f.editId) h += '<div class="chips">' + S.quick.map(q => '<button class="chip" data-act="quickUse" data-id="' + q.id + '">' + esc(q.name) + '</button>').join('') + '</div>';
   h += '<div class="seg">' + ['支', '收', '轉帳'].map(t => '<button data-act="tfType" data-v="' + t + '" class="' + (f.type === t ? 'on' : '') + '">' + (t === '支' ? '支出' : t === '收' ? '收入' : '轉帳') + '</button>').join('') + '</div>';
   if (!tr) {
     h += '<label>金額' + (acur(f.account) !== 'TWD' ? '（' + acur(f.account) + '）' : '') + '<input class="big" data-t="amount" inputmode="decimal" placeholder="0" value="' + esc(f.amount) + '"></label>';
@@ -208,6 +211,7 @@ function addView() {
   h += '<label>備註<input data-t="note" value="' + esc(f.note) + '"></label>';
   h += '<button class="btn block" data-act="saveTx">' + (f.editId ? '儲存修改' : '儲存') + '</button>';
   if (f.editId) h += '<div class="fbtn"><button class="btn sec" data-act="cancelTx">取消</button><button class="btn sec" data-act="delTx">刪除</button></div>';
+  if (!f.editId && !tr) h += '<button class="link" data-act="quickSave">☆ 把目前這筆存成常用</button>';
   return h + '<p class="sub">手續費填在這裡，會跟這筆放在同一筆交易（算在「金融費用」）。</p></div>';
 }
 async function saveTx() {
@@ -251,6 +255,9 @@ const ENT = {
     F('group_name', '分類（群組）', 'text', { req: 1, dl: [...new Set(S.items.map(i => i.group_name))] }), F('active', '使用中', 'check')], defaults: { type: '支', active: true } },
   trip: { table: 'trips', title: '旅遊', prefix: 'T', list: () => S.trips, back: 'settings', fields: () => [
     F('name', '名稱', 'text', { req: 1 }), F('start_date', '開始日', 'date'), F('end_date', '結束日', 'date'), F('currency', '主要幣別', 'text', { upper: 1 }), F('active', '使用中', 'check')], defaults: { active: true } },
+  goal: { table: 'goals', title: '存款目標', prefix: 'G', list: () => S.goals, back: 'goals', fields: () => [
+    F('name', '名稱', 'text', { req: 1 }), F('account_id', '對應帳戶（餘額就是目前存了多少）', 'select', { opts: S.accts.filter(a => a.active && a.kind !== '信用卡').map(a => [a.id, a.name + (a.currency !== 'TWD' ? '（' + a.currency + '）' : '')]), blank: 1 }),
+    F('target_amount', '目標金額（帳戶的幣別）', 'number', { req: 1 }), F('active', '使用中', 'check')], defaults: { active: true } },
   sub: { table: 'subscriptions', title: '訂閱', prefix: 'S', list: () => S.subs, back: 'subs', fields: () => [
     F('name', '名稱', 'text', { req: 1 }), F('account_id', '扣款帳戶', 'select', { opts: S.accts.filter(a => a.active).map(a => [a.id, a.name]), blank: 1 }),
     F('item_id', '支出項目', 'select', { opts: S.items.filter(i => i.type === '支' && i.active).map(i => [i.id, i.group_name + '／' + i.name]), blank: 1 }),
@@ -292,7 +299,7 @@ async function entSave() {
     else if (f.t === 'number') { v = (v === '' || v == null) ? null : Number(v); if (v != null && isNaN(v)) return toast('「' + f.label + '」要填數字'); }
     else { v = (v == null ? '' : String(v)).trim(); if (f.upper) v = v.toUpperCase(); if (v === '') v = null; }
     if (f.req && (v == null)) return toast('請填「' + f.label.split('（')[0] + '」');
-    if (f.t === 'select' && f.blank && v == null && (fm.kind === 'sub' || fm.kind === 'inst') ) return toast('請選擇「' + f.label.split('（')[0] + '」');
+    if (f.t === 'select' && f.blank && v == null && (fm.kind === 'sub' || fm.kind === 'inst' || fm.kind === 'goal')) return toast('請選擇「' + f.label.split('（')[0] + '」');
     out[f.k] = v;
   }
   if (fm.kind === 'acct') {
@@ -305,6 +312,7 @@ async function entSave() {
     if (!out.next_date && out.anchor_day) out.next_date = nextDateFor(out.anchor_day);
     if (out.auto_post && !out.next_date) return toast('自動入帳需要「每月幾號」或「下次扣款日」');
   }
+  if (fm.kind === 'goal') { if (!(out.target_amount > 0)) return toast('目標金額要大於 0'); out.currency = acur(out.account_id); }
   if (fm.kind === 'sub' && !(out.amount > 0)) return toast('每期金額要大於 0');
   if (fm.kind === 'inst') {
     if (!(out.total_amount > 0) || !(out.periods > 0)) return toast('總金額與期數要大於 0');
@@ -402,14 +410,16 @@ function dashView() {
   h += '<div class="two"><div class="panel"><h3>最近交易 <button class="link" data-act="go" data-p="list">全部 ›</button></h3>' + (S.pend.map(p => txRow({ ...p.row, id: p.id }, true)).join('') + S.recent.map(t => txRow(t)).join('') || '<p class="sub">還沒有交易</p>') + '</div>' + fxPanel() + '</div>';
   return h;
 }
-function trend() {
-  const ms = []; for (let i = 7; i >= 0; i--) ms.push(addMonth(curMonth(), -i));
+function trend(n, hl) {
+  n = n || 8;
+  const end = hl || curMonth(), ms = [];
+  for (let i = n - 1; i >= 0; i--) ms.push(addMonth(end, -i));
   const d = ms.map(m => { const r = S.monthly.find(x => x.month === m) || {}; return [m, num(r.income), num(r.expense)]; });
-  const mx = Math.max(1, ...d.map(x => Math.max(x[1], x[2])));
-  let s = '<svg class="chart" viewBox="0 0 320 130" role="img" aria-label="近八個月收入與支出長條圖">';
+  const mx = Math.max(1, ...d.map(x => Math.max(x[1], x[2]))), W = n * 38 + 8;
+  let s = '<svg class="chart" viewBox="0 0 ' + W + ' 130" role="img" aria-label="收入與支出長條圖">';
   d.forEach((x, i) => {
-    const bx = 8 + i * 38, hi = x[1] / mx * 96, he = x[2] / mx * 96;
-    s += '<rect class="bi" x="' + bx + '" y="' + (104 - hi) + '" width="14" height="' + hi + '" rx="2"><title>' + x[0] + ' 收入 ' + money(x[1]) + '</title></rect><rect class="be" x="' + (bx + 15) + '" y="' + (104 - he) + '" width="14" height="' + he + '" rx="2"><title>' + x[0] + ' 支出 ' + money(x[2]) + '</title></rect><text x="' + (bx + 15) + '" y="120" text-anchor="middle">' + x[0].slice(5) + '月</text>';
+    const bx = 8 + i * 38, hi = x[1] / mx * 96, he = x[2] / mx * 96, op = hl && x[0] !== hl ? ' opacity=".45"' : '';
+    s += '<g' + op + '><rect class="bi" x="' + bx + '" y="' + (104 - hi) + '" width="14" height="' + hi + '" rx="2"><title>' + x[0] + ' 收入 ' + money(x[1]) + '</title></rect><rect class="be" x="' + (bx + 15) + '" y="' + (104 - he) + '" width="14" height="' + he + '" rx="2"><title>' + x[0] + ' 支出 ' + money(x[2]) + '</title></rect></g><text x="' + (bx + 15) + '" y="120" text-anchor="middle">' + x[0].slice(5) + '月</text>';
   });
   return s + '</svg><div class="legend"><span><i style="background:var(--inc)"></i>收入</span><span><i style="background:var(--exp)"></i>支出</span></div>';
 }
@@ -477,11 +487,29 @@ function cardsView() {
     const a = x.a, st = x.bal < 0 ? '待繳 ' + money(-x.bal) : x.bal > 0 ? '溢繳 ' + money(x.bal) : '已繳清';
     const days = (a.statement_day ? '結帳 ' + a.statement_day + ' 號' : '') + (a.due_day ? (a.statement_day ? '・' : '') + '繳款 ' + a.due_day + ' 號' : '');
     if (S.sort) { const i = cs.findIndex(c => c.id === a.id); return '<div class="panel item"><div><b>' + esc(a.name) + '</b></div><span class="pa"><button class="mvb" data-act="acctMove" data-id="' + a.id + '" data-d="-1"' + (i === 0 ? ' disabled' : '') + '>▲</button><button class="mvb" data-act="acctMove" data-id="' + a.id + '" data-d="1"' + (i === cs.length - 1 ? ' disabled' : '') + '>▼</button></span></div>'; }
-    return '<div class="panel item click" data-act="acctEdit" data-id="' + a.id + '"><div><b>' + esc(a.name) + '</b>' + (a.active ? '' : '<span class="tag">停用</span>') + '<br><small>' + esc(a.institution || '') + (days ? ' ・ ' + days : '') + '</small></div><div class="amt ' + (x.bal < 0 ? 'e' : x.bal > 0 ? 'i' : '') + '">' + st + '</div></div>';
+    return '<div class="panel item click" data-act="acctEdit" data-id="' + a.id + '"><div><b>' + esc(a.name) + '</b>' + (a.active ? '' : '<span class="tag">停用</span>') + '<br><small>' + esc(a.institution || '') + (days ? ' ・ ' + days : '') + '</small></div><div class="amt ' + (x.bal < 0 ? 'e' : x.bal > 0 ? 'i' : '') + '">' + st + (x.bal < 0 && a.active ? '<br><button class="btn sm" data-act="payOpen" data-id="' + a.id + '">繳款</button>' : '') + '</div></div>';
   }).join('') + '</div>';
   return h;
 }
 
+function payForm() {
+  const v = S.form.v, cs = S.accts.filter(a => a.kind === '信用卡' && a.active);
+  return '<div class="ph"><h2>信用卡繳款</h2></div><div class="form"><p class="sub">會記一筆「轉帳」：從銀行／現金轉到這張信用卡，卡片欠款就會扣掉。</p>' +
+    fieldHtml(F('card', '繳哪一張卡', 'select', { opts: cs.map(a => [a.id, a.name]) }), v) +
+    fieldHtml(F('from', '從哪個帳戶扣（台幣）', 'select', { opts: S.accts.filter(a => a.active && a.kind !== '信用卡' && a.currency === 'TWD').map(a => [a.id, a.name]), blank: 1 }), v) +
+    fieldHtml(F('amount', '繳款金額', 'number'), v) + fieldHtml(F('date', '日期', 'date'), v) +
+    '<div class="fbtn"><button class="btn sec" data-act="formCancel">取消</button><button class="btn" data-act="paySave">記錄繳款</button></div></div>';
+}
+async function paySave() {
+  const v = S.form.v, amt = Number(v.amount);
+  if (!v.from) return toast('請選擇扣款帳戶');
+  if (!(amt > 0)) return toast('請輸入繳款金額');
+  if (!v.date) return toast('請選擇日期');
+  queue('insert', uuid(), { type: '轉帳', tx_date: v.date, from_account_id: v.from, from_amount: amt, to_account_id: v.card, to_amount: amt, account_id: null, amount: null, item_id: null, trip_id: null, fee: 0, note: '信用卡繳款', fx_rate: null });
+  store.set('lastPay', v.from);
+  S.form = null; render(); await flush();
+  if (S.pend.length) toast('已暫存，連線後會自動送出'); else toast('已記錄繳款');
+}
 function subsView() {
   let h = '<div class="ph"><h2>訂閱與分期</h2><div class="pa"><button class="btn sm sec" data-act="runNow">檢查今天到期項目</button></div></div>';
   h += '<div class="box">到扣款日，系統每天凌晨與你打開 App 時會自動入帳；手續費另開一列。</div>';
@@ -500,11 +528,23 @@ async function runNow(silent) {
   if (data && data.errors && data.errors.length) toast('有項目失敗：' + data.errors[0].name + '：' + data.errors[0].error);
 }
 
+function compareTable(m) {
+  const p = addMonth(m, -1), y = addMonth(m, -12);
+  const get = (mm, g) => num((S.cat.find(c => c.month === mm && c.grp === g) || {}).amount);
+  const groups = [...new Set(S.cat.filter(c => [m, p, y].includes(c.month)).map(c => c.grp))];
+  groups.sort((a, b) => get(m, b) - get(m, a));
+  const tot = mm => num((S.monthly.find(x => x.month === mm) || {}).expense);
+  const diff = (a, b) => { if (!b) return a ? '<small class="e">新增</small>' : ''; const d = (a - b) / b * 100; return '<small class="' + (d > 0 ? 'e' : 'i') + '">' + (d > 0 ? '+' : '') + Math.round(d) + '%</small>'; };
+  const mz = v => (v ? money(v) : '—'); const row = (n, a, b, c, bold) => '<div class="' + (bold ? 'bd' : '') + '">' + esc(n) + '</div><div class="r ' + (bold ? 'bd' : '') + '">' + money(a) + '</div><div class="r ' + (bold ? 'bd' : '') + '">' + mz(b) + '<br>' + diff(a, b) + '</div><div class="r ' + (bold ? 'bd' : '') + '">' + mz(c) + '<br>' + diff(a, c) + '</div>';
+  return '<div class="cmp"><div class="h">分類</div><div class="h r">' + m.slice(5) + ' 月</div><div class="h r">上月 ' + p.slice(5) + '</div><div class="h r">去年 ' + y + '</div>' +
+    row('支出合計', tot(m), tot(p), tot(y), true) + groups.map(g => row(g, get(m, g), get(p, g), get(y, g))).join('') + '</div><p class="sub">百分比＝本月比該月增減（紅色＝花得比較多）。</p>';
+}
 function reportView() {
   const m = S.rm, r = S.monthly.find(x => x.month === m) || {}, inc = num(r.income), exp = num(r.expense);
   return '<div class="ph"><h2>月報</h2><div class="pa"><button class="btn sm sec" data-act="rmon" data-d="-1">‹</button><b>' + m + '</b><button class="btn sm sec" data-act="rmon" data-d="1">›</button></div></div>' +
     '<div class="sum"><div>收入<b class="i">' + money(inc) + '</b></div><div>支出<b class="e">' + money(exp) + '</b></div><div>結餘<b>' + money(inc - exp) + '</b></div></div>' +
-    '<div class="panel"><h3>分類支出與預算 <button class="btn sm sec" data-act="budgetEdit">設定預算</button></h3>' + catBars(m, true) + '</div>';
+    '<div class="panel"><h3>近 12 個月收支</h3>' + trend(12, m) + '</div>' +
+    '<div class="two"><div class="panel"><h3>分類支出與預算 <button class="btn sm sec" data-act="budgetEdit">設定預算</button></h3>' + catBars(m, true) + '</div><div class="panel"><h3>和上月、去年同月比較</h3>' + compareTable(m) + '</div></div>';
 }
 function budgetForm() {
   const groups = [...new Set(S.items.filter(i => i.type === '支').map(i => i.group_name)), '金融費用'];
@@ -535,6 +575,7 @@ function settingsView() {
       ? '<div class="item"><span>' + esc(i.group_name) + '／' + esc(i.name) + '</span><span class="pa"><button class="mvb" data-act="itemMove" data-id="' + i.id + '" data-d="-1"' + (n === 0 ? ' disabled' : '') + '>▲</button><button class="mvb" data-act="itemMove" data-id="' + i.id + '" data-d="1"' + (n === l.length - 1 ? ' disabled' : '') + '>▼</button></span></div>'
       : '<div class="item click" data-act="itemEdit" data-id="' + i.id + '" style="' + (i.active ? '' : 'opacity:.5') + '"><span>' + esc(i.name) + ' <small>' + esc(i.group_name) + '</small></span></div>').join('') + '</div></div>';
   });
+  if (S.quick.length) h += '<div class="panel"><h3>常用交易</h3>' + S.quick.map((q, n) => '<div class="item"><span>' + esc(q.name) + ' <small>' + esc(itemName(q.item_id)) + ' · ' + esc(an(q.account_id)) + (q.amount != null ? ' · ' + money(q.amount) : '') + '</small></span><span class="pa"><button class="mvb" data-act="quickMove" data-id="' + q.id + '" data-d="-1"' + (n === 0 ? ' disabled' : '') + '>▲</button><button class="mvb" data-act="quickMove" data-id="' + q.id + '" data-d="1"' + (n === S.quick.length - 1 ? ' disabled' : '') + '>▼</button><button class="btn sm sec" data-act="quickDel" data-id="' + q.id + '">刪除</button></span></div>').join('') + '</div>';
   h += '<div class="panel"><h3>旅遊 <button class="btn sm" data-act="tripNew">＋ 新增</button></h3>' + (S.trips.map(t => '<div class="item click" data-act="tripEdit" data-id="' + t.id + '"><span>' + esc(t.name) + '</span><small>' + (t.start_date || '') + (t.end_date ? ' ~ ' + t.end_date : '') + '</small></div>').join('') || '<p class="sub">尚無</p>') + '</div>';
   h += '<div class="panel"><h3>匯率 <button class="btn sm sec" data-act="fxUpdate">自動更新</button></h3>' + Object.values(latestFx()).map(f => '<div class="item"><span>' + f.currency + '</span><span>' + Number(f.rate).toFixed(4) + ' <small>' + f.rate_date + '</small></span></div>').join('') + '<button class="link" data-act="fxManual">手動輸入匯率</button></div>';
   h += '<div class="panel"><h3>資料</h3><div class="pa"><button class="btn sm sec" data-act="exportAll">備份全部（JSON）</button><button class="btn sm sec" data-act="exportCsv">匯出交易（CSV）</button><button class="btn sm sec" data-act="go" data-p="legacy">查看舊資料（唯讀）</button></div></div>';
@@ -567,8 +608,15 @@ function legacyView() {
     (L.rows.map(t => '<div class="item"><div><b>' + esc(t.item_name || t.type || '') + '</b><br><small>' + esc(t.tx_date || '') + ' · ' + esc(t.account_name || (t.from_name ? t.from_name + ' → ' + t.to_name : '')) + (t.note ? ' · ' + esc(t.note) : '') + '</small></div><div class="amt">' + (t.amount != null ? Math.round(num(t.amount)).toLocaleString('zh-TW') : t.from_amount != null ? Math.round(num(t.from_amount)).toLocaleString('zh-TW') : '') + '</div></div>').join('') || '<p class="sub">沒有資料</p>') +
     '</div><div class="pa"><button class="btn sm sec" data-act="lpage" data-d="-1"' + (L.p === 0 ? ' disabled' : '') + '>上一頁</button><span class="sub">' + (L.n ? (L.p * 50 + 1) + '–' + Math.min(L.n, L.p * 50 + 50) + ' / ' + L.n : '0') + '</span><button class="btn sm sec" data-act="lpage" data-d="1"' + ((L.p + 1) * 50 >= L.n ? ' disabled' : '') + '>下一頁</button></div>';
 }
+function goalsView() {
+  const l = S.goals.filter(g => g.active || S.showOff);
+  return '<div class="ph"><h2>存款目標</h2><div class="pa"><button class="btn sm" data-act="goalNew">＋ 新增</button></div></div>' + (l.length ? '<div class="cols2">' + l.map(g => {
+    const b = num((S.bal.find(x => x.id === g.account_id) || {}).balance), t = num(g.target_amount), pct = Math.max(0, Math.min(100, b / t * 100)), c = g.currency;
+    return '<div class="panel click" data-act="goalEdit" data-id="' + g.id + '"><div class="item" style="border:0;padding:0"><b>' + esc(g.name) + '</b><b>' + Math.round(pct) + '%</b></div><div class="bar"><i style="width:' + pct + '%"></i></div><div class="sub">' + esc(an(g.account_id)) + '：' + mc(b, c) + ' / ' + mc(t, c) + (b < t ? '　還差 ' + mc(t - b, c) : '　🎉 已達成') + '</div></div>';
+  }).join('') + '</div>' : '<div class="box">還沒有目標。新增時選一個帳戶，帳戶裡的餘額就是目前存了多少。</div>');
+}
 function moreView() {
-  return '<div class="ph"><h2>更多</h2></div><div class="panel">' + [['cards', '信用卡'], ['subs', '訂閱與分期'], ['report', '月報與預算'], ['settings', '設定']].map(x => '<div class="item click" data-act="go" data-p="' + x[0] + '"><b>' + x[1] + '</b><span>›</span></div>').join('') + '</div>';
+  return '<div class="ph"><h2>更多</h2></div><div class="panel">' + [['cards', '信用卡'], ['goals', '存款目標'], ['subs', '訂閱與分期'], ['report', '月報與預算'], ['settings', '設定']].map(x => '<div class="item click" data-act="go" data-p="' + x[0] + '"><b>' + x[1] + '</b><span>›</span></div>').join('') + '</div>';
 }
 
 /* ---------- 匯出 ---------- */
@@ -599,7 +647,7 @@ async function exportCsv() {
 }
 
 /* ---------- 版面 ---------- */
-const NAV = [['dash', '總覽'], ['add', '記帳'], ['list', '明細'], ['acct', '帳戶'], ['cards', '信用卡'], ['subs', '訂閱與分期'], ['report', '月報'], ['settings', '設定']];
+const NAV = [['dash', '總覽'], ['add', '記帳'], ['list', '明細'], ['acct', '帳戶'], ['cards', '信用卡'], ['goals', '存款目標'], ['subs', '訂閱與分期'], ['report', '月報'], ['settings', '設定']];
 const BOT = [['dash', '總覽'], ['list', '明細'], ['add', '＋記帳'], ['acct', '帳戶'], ['more', '更多']];
 function loginView() {
   return '<div class="login"><h2 style="margin-bottom:14px">記帳</h2><label>Email<input id="em" type="email" autocomplete="username"></label><label>密碼<input id="pw" type="password" autocomplete="current-password"></label>' +
@@ -611,11 +659,12 @@ function body() {
     if (f.kind === 'card') return cardForm();
     if (f.kind === 'budget') return budgetForm();
     if (f.kind === 'fx') return fxForm();
+    if (f.kind === 'pay') return payForm();
     return entForm();
   }
   switch (S.page) {
     case 'dash': return dashView(); case 'add': return addView(); case 'list': return listView(); case 'acct': return acctView();
-    case 'cards': return cardsView(); case 'subs': return subsView(); case 'report': return reportView(); case 'settings': return settingsView();
+    case 'goals': return goalsView(); case 'cards': return cardsView(); case 'subs': return subsView(); case 'report': return reportView(); case 'settings': return settingsView();
     case 'legacy': return legacyView(); case 'more': return moreView();
   }
   return '';
@@ -623,7 +672,7 @@ function body() {
 function render() {
   const app = $('#app');
   if (!S.user) { app.innerHTML = loginView(); return; }
-  const on = p => (S.page === p || (p === 'more' && ['cards', 'subs', 'report', 'settings', 'legacy'].includes(S.page))) ? 'on' : '';
+  const on = p => (S.page === p || (p === 'more' && ['cards', 'goals', 'subs', 'report', 'settings', 'legacy'].includes(S.page))) ? 'on' : '';
   const ae = document.activeElement, keep = ae && ae.id && $('#' + ae.id) ? ae.id : null;
   app.innerHTML = '<div class="shell"><nav class="side"><div class="brand">記帳</div>' + NAV.map(n => '<button data-act="go" data-p="' + n[0] + '" class="' + on(n[0]) + '">' + n[1] + '</button>').join('') + '</nav><main>' + body() + '</main></div>' +
     '<nav class="bottom">' + BOT.map(n => '<button data-act="go" data-p="' + n[0] + '" class="' + on(n[0]) + '">' + n[1] + '</button>').join('') + '</nav>';
@@ -643,6 +692,22 @@ const ACT = {
     if (d.p === 'legacy') loadLegacy().then(render);
     if (d.p === 'add' && S.tf && S.tf.editId) { S.tf = newTf(); render(); }
   },
+  quickUse(d) {
+    const q = S.quick.find(x => x.id === d.id); if (!q) return;
+    S.tf = { ...newTf(q.type), type: q.type, account: q.account_id || '', item: q.item_id || '', amount: q.amount != null ? String(q.amount) : '', trip: q.trip_id || '', note: q.note || '' };
+    render(); toast('已帶入「' + q.name + '」，確認金額後儲存');
+  },
+  async quickSave() {
+    const f = S.tf;
+    if (!f.account || !f.item) return toast('先選好帳戶和項目再存成常用');
+    if (!S.quickOk) return toast('請先在 Supabase 執行 schema_v3.sql');
+    const name = prompt('這個常用交易要叫什麼？（例如：早餐）', itemName(f.item)); if (!name) return;
+    const { error } = await sb.from('quick_entries').insert({ name: name.trim(), type: f.type, account_id: f.account, item_id: f.item, amount: f.amount === '' ? null : Number(f.amount), trip_id: f.trip || null, note: f.note || null, sort_order: S.quick.reduce((m, x) => Math.max(m, x.sort_order || 0), 0) + 10 });
+    if (error) return toast('儲存失敗：' + error.message);
+    await load(); render(); toast('已存成常用');
+  },
+  async quickDel(d) { if (!confirm('刪除這個常用交易？')) return; const { error } = await sb.from('quick_entries').delete().eq('id', d.id); if (error) return toast(error.message); await load(); render(); },
+  quickMove(d) { return moveRows('quick_entries', S.quick, d.id, Number(d.d)); },
   tfType(d) { S.tf.type = d.v; S.tf.item = ''; render(); },
   saveTx, cancelTx() { S.tf = newTf(); S.page = 'list'; render(); loadTxs().then(render); },
   async delTx() {
@@ -679,8 +744,11 @@ const ACT = {
   itemSort() { S.sort = !S.sort; render(); },
   itemMove(d) { const it = S.items.find(x => x.id === d.id); return moveRows('items', S.items.filter(x => x.type === it.type), d.id, Number(d.d)); },
   tripNew() { openEnt('trip'); }, tripEdit(d) { openEnt('trip', d.id); },
+  goalNew() { openEnt('goal'); }, goalEdit(d) { openEnt('goal', d.id); },
   subNew() { openEnt('sub'); }, subEdit(d) { openEnt('sub', d.id); }, instNew() { openEnt('inst'); }, instEdit(d) { openEnt('inst', d.id); },
   runNow() { return runNow(false); },
+  payOpen(d) { const a = A(d.id), b = num((S.bal.find(x => x.id === d.id) || {}).balance); S.form = { kind: 'pay', v: { card: d.id, from: store.get('lastPay', ''), amount: b < 0 ? String(Math.round(-b * 100) / 100) : '', date: todayStr() } }; render(); window.scrollTo(0, 0); },
+  paySave,
   budgetEdit() { const v = {}; const groups = [...new Set(S.items.filter(i => i.type === '支').map(i => i.group_name)), '金融費用']; groups.forEach((g, i) => { const b = S.budgets.find(x => x.group_name === g); if (b) v['b' + i] = num(b.amount_twd); }); S.form = { kind: 'budget', v }; render(); },
   fxUpdate() { return fxUpdate(false); },
   fxManual() { S.form = { kind: 'fx', v: { currency: '', rate: '', date: todayStr() } }; render(); },

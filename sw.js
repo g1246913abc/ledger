@@ -1,5 +1,5 @@
 // 離線快取：只快取 App 本身（網頁、圖示、supabase-js），資料一律走網路
-const V = 'ledger-v4';
+const V = 'ledger-v5';
 const SHELL = ['./', 'index.html', 'style.css', 'app.js', 'formula.js', 'manifest.webmanifest', 'icon-192.png', 'icon-512.png', 'apple-touch-icon.png'];
 const CDN = 'https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.45.4/dist/umd/supabase.min.js';
 

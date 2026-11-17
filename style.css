@@ -101,3 +101,9 @@ details summary{cursor:pointer;color:var(--mute);font-size:13px;margin-top:8px}
 #toast.on{opacity:1}
 @media(min-width:900px){#toast{bottom:24px}}
 .login{max-width:380px;margin:12vh auto 0;padding:0 16px}
+.cmp{display:grid;grid-template-columns:1.3fr 1fr 1fr 1fr;gap:6px 8px;font-size:13px;align-items:start}
+.cmp .h{color:var(--mute);font-size:12px}
+.cmp .r{text-align:right}
+.cmp .bd{font-weight:700}
+.panel.click{cursor:pointer}
+.chart{max-height:230px}
