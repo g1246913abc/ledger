@@ -403,8 +403,8 @@ function dashView() {
   if (S.pend.length) h += '<div class="box warn">有 ' + S.pend.length + ' 筆待同步，連線後會自動送出。<button class="btn sm" data-act="flush">立即同步</button></div>';
   h += '<div class="cards">' + S.cards.map((c, i) => {
     const r = Formula.evalFormula(c.formula, v);
-    return '<div class="mcard"><div class="mh"><span>' + esc(c.title) + '</span><span class="mc"><button class="ico" data-act="cardMove" data-id="' + c.id + '" data-d="-1"' + (i === 0 ? ' disabled' : '') + ' aria-label="往前">←</button><button class="ico" data-act="cardMove" data-id="' + c.id + '" data-d="1"' + (i === n - 1 ? ' disabled' : '') + ' aria-label="往後">→</button><button class="ico" data-act="cardEdit" data-id="' + c.id + '" aria-label="設定">⚙</button></span></div>' +
-      '<div class="cv ' + (r.error ? 'e' : '') + '">' + (r.error ? '公式有誤' : esc(Formula.fmt(r.value, c.format))) + '</div><div class="mn">' + esc(r.error || c.note || '') + '</div></div>';
+    const ctl = '<span class="mc"><button class="ico" data-act="cardMove" data-id="' + c.id + '" data-d="-1"' + (i === 0 ? ' disabled' : '') + ' aria-label="往前">←</button><button class="ico" data-act="cardMove" data-id="' + c.id + '" data-d="1"' + (i === n - 1 ? ' disabled' : '') + ' aria-label="往後">→</button><button class="ico" data-act="cardEdit" data-id="' + c.id + '" aria-label="設定">⚙</button></span>';
+    return '<div class="mcard"><div class="mh">' + esc(c.title) + '</div><div class="cv ' + (r.error ? 'e' : '') + '">' + (r.error ? '公式有誤' : esc(Formula.fmt(r.value, c.format))) + '</div><div class="mfoot"><span class="mn">' + esc(r.error || c.note || '') + '</span>' + ctl + '</div></div>';
   }).join('') + '</div>';
   h += '<div class="two"><div class="panel"><h3>近 8 個月收支</h3>' + trend() + '</div><div class="panel"><h3>本月支出分類</h3>' + catBars(curMonth(), false) + '</div></div>';
   h += '<div class="two"><div class="panel"><h3>最近交易 <button class="link" data-act="go" data-p="list">全部 ›</button></h3>' + (S.pend.map(p => txRow({ ...p.row, id: p.id }, true)).join('') + S.recent.map(t => txRow(t)).join('') || '<p class="sub">還沒有交易</p>') + '</div>' + fxPanel() + '</div>';
