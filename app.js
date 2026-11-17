@@ -168,7 +168,7 @@ function txAmt(t) {
 function txRow(t, pending) {
   const title = t.type === '轉帳' ? an(t.from_account_id) + ' → ' + an(t.to_account_id) : (itemName(t.item_id) || (t.type === '支' ? '支出' : '收入'));
   const sub = (t.type === '轉帳' ? '轉帳' : an(t.account_id)) + (t.trip_id ? ' · ' + esc((S.trips.find(x => x.id === t.trip_id) || {}).name || '') : '') + (t.note ? ' · ' + esc(t.note) : '');
-  const tag = (pending ? '<span class="tag">待同步</span>' : '') + (t.source && t.source !== 'app' ? '<span class="tag">自動</span>' : '') + (num(t.fee) > 0 ? '<span class="tag">手續費 ' + mc(t.fee, acur(t.type === '轉帳' ? t.from_account_id : t.account_id)) + '</span>' : '');
+  const tag = (pending ? '<span class="tag">待同步</span>' : '') + (t.source === 'legacy' ? '<span class="tag">舊系統</span>' : t.source && t.source !== 'app' ? '<span class="tag">自動</span>' : '') + (num(t.fee) > 0 ? '<span class="tag">手續費 ' + mc(t.fee, acur(t.type === '轉帳' ? t.from_account_id : t.account_id)) + '</span>' : '');
   return '<div class="item click" data-act="editTx" data-id="' + t.id + '"><div><b>' + esc(title) + '</b>' + tag + '<br><small>' + md(t.tx_date) + ' · ' + sub + '</small></div><div class="amt">' + txAmt(t) + '</div></div>';
 }
 
