@@ -28,8 +28,10 @@ input:focus,select:focus,button:focus-visible{outline:2px solid var(--acc);outli
 .seg button.on{background:var(--card);color:var(--ink);box-shadow:0 1px 2px #0002}
 .btn{width:100%;margin-top:20px;padding:14px;border:0;border-radius:12px;background:var(--acc);color:var(--onacc);font-weight:700;font-size:17px}
 .btn:disabled{opacity:.5}
+.chk{display:flex;align-items:center;gap:8px;margin-top:14px;color:var(--ink);font-size:16px}.chk input{width:auto;margin:0}
+.btn.sec{background:transparent;color:var(--ink);border:1px solid var(--line);margin-top:10px}
 .link{background:none;border:0;color:var(--mute);padding:8px 0;text-decoration:underline}
-nav{position:fixed;inset:auto 0 0 0;display:grid;grid-template-columns:repeat(4,1fr);background:var(--card);border-top:1px solid var(--line);padding-bottom:env(safe-area-inset-bottom)}
+nav{position:fixed;inset:auto 0 0 0;display:grid;grid-template-columns:repeat(5,1fr);background:var(--card);border-top:1px solid var(--line);padding-bottom:env(safe-area-inset-bottom)}
 nav button{border:0;background:none;padding:14px 0;font-weight:600;color:var(--mute)}
 nav button.on{color:var(--acc);box-shadow:inset 0 3px 0 var(--acc)}
 .item{display:flex;justify-content:space-between;gap:12px;padding:12px 0;border-bottom:1px solid var(--line);cursor:pointer}
@@ -100,30 +102,30 @@ function login(msg){
 }
 function render(){
   if(!S.user)return login();
-  const tabs=[['add','記帳'],['list','明細'],['bal','帳戶'],['mon','月報']];
+  const tabs=[['add','記帳'],['list','明細'],['bal','帳戶'],['mon','月報'],['set','設定']];
   $('#app').innerHTML=`<main id=v></main><nav>${tabs.map(([k,l])=>`<button data-act=tab data-k=${k} class="${S.tab==k?'on':''}">${l}</button>`).join('')}</nav>`;
-  ({add:vAdd,list:vList,bal:vBal,mon:vMon})[S.tab]();
+  ({add:vAdd,list:vList,bal:vBal,mon:vMon,set:vSet})[S.tab]();
 }
 
 function vAdd(){
-  const t=S.type,A=S.acc.filter(a=>a.active),last=ls('last')||{};
+  const E=S.edit,t=E?E.type:S.type,A=S.acc.filter(a=>a.active||(E&&[E.account_id,E.from_account_id,E.to_account_id].includes(a.id))),last=E?{acc:E.account_id,from:E.from_account_id,to:E.to_account_id,['item'+t]:E.item_id}:(ls('last')||{});
   const opt=(arr,sel,f)=>arr.map(x=>`<option value="${esc(x.id)}"${x.id==sel?' selected':''}>${esc(f(x))}</option>`).join('');
   const accOpt=sel=>opt(A,sel,a=>`${a.name}（${a.currency}）`);
   const seg=['支','收','轉帳'].map(x=>`<button type=button data-act=type data-k="${x}" class="${x==t?'on':''}">${x}</button>`).join('');
   const body=t=='轉帳'
     ?`<label>轉出帳戶<select id=from>${accOpt(last.from)}</select></label>
       <label>轉入帳戶<select id=to>${accOpt(last.to)}</select></label>
-      <div class=row><label>轉出金額<input id=fa inputmode=decimal></label><label>轉入金額<input id=ta inputmode=decimal></label></div>
+      <div class=row><label>轉出金額<input id=fa inputmode=decimal value="${E?+E.from_amount:''}"></label><label>轉入金額<input id=ta inputmode=decimal value="${E?+E.to_amount:''}"></label></div>
       <p class=sub>同幣別轉帳，轉入金額會自動帶入；換匯請填實際收到的金額。</p>`
-    :`<input id=amt class=big inputmode=decimal placeholder=0 aria-label=金額>
+    :`<input id=amt class=big inputmode=decimal placeholder=0 aria-label=金額 value="${E?+E.amount:''}">
       <label>帳戶<select id=acc>${accOpt(last.acc)}</select></label>
-      <label>項目<select id=item>${opt(S.items.filter(i=>i.active&&i.type==t),last['item'+t],i=>i.name)}</select></label>`;
-  const fee=t=='收'?'':`<label>手續費（以扣款帳戶幣別計）<input id=fee inputmode=decimal placeholder=0></label>`;
-  $('#v').innerHTML=`<h2>記一筆</h2><div class=seg>${seg}</div>${body}${fee}
-  <label>旅遊<select id=trip><option value="">無</option>${opt(S.trips.filter(x=>x.active),'',x=>x.name)}</select></label>
-  <label>日期<input id=date type=date value="${S.date}"></label>
-  <label>備註<input id=note></label>
-  <button class=btn data-act=save id=sv>儲存</button>`;
+      <label>項目<select id=item>${opt(S.items.filter(i=>(i.active||(E&&i.id==E.item_id))&&i.type==t),last['item'+t],i=>i.name)}</select></label>`;
+  const fee=t=='收'?'':`<label>手續費（以扣款帳戶幣別計）<input id=fee inputmode=decimal placeholder=0 value="${E&&E.fee>0?+E.fee:''}"></label>`;
+  $('#v').innerHTML=`<h2>${E?'修改這筆':'記一筆'}</h2>${E?'':`<div class=seg>${seg}</div>`}${body}${fee}
+  <label>旅遊<select id=trip><option value="">無</option>${opt(S.trips.filter(x=>x.active||(E&&x.id==E.trip_id)),E?.trip_id,x=>x.name)}</select></label>
+  <label>日期<input id=date type=date value="${E?E.tx_date:S.date}"></label>
+  <label>備註<input id=note value="${esc(E?.note||'')}"></label>
+  <button class=btn data-act=save id=sv>${E?'儲存修改':'儲存'}</button>${E?'<button class="btn sec" data-act=delx>刪除這筆</button><button class="btn sec" data-act=cancel>取消</button>':''}`;
   const fa=$('#fa');if(fa)fa.oninput=()=>{const f=S.acc.find(a=>a.id==$('#from').value),o=S.acc.find(a=>a.id==$('#to').value);if(f&&o&&f.currency==o.currency)$('#ta').value=fa.value};
 }
 async function save(){
@@ -138,6 +140,12 @@ async function save(){
     Object.assign(row,{account_id:v('acc'),item_id:v('item'),amount:num(v('amt'))});
     L.acc=row.account_id;L['item'+t]=row.item_id;
     if(!(row.amount>0))return toast('請輸入金額');
+  }
+  if(S.edit){
+    const id=S.edit.id,u={...row,fx_rate:null};delete u.id;$('#sv').disabled=true;
+    const {error}=await sb.from('transactions').update(u).eq('id',id);
+    if(error){$('#sv').disabled=false;return toast('未儲存：'+error.message)}
+    S.edit=null;S.tab='list';toast('已修改');return render();
   }
   ls('last',L);S.date=row.tx_date;
   $('#sv').disabled=true;
@@ -155,13 +163,13 @@ async function vList(){
   const pend=S.pend.map((p,i)=>`<div class="box warn"><b>尚未送出</b>　${esc(p.row.tx_date)} ${esc(p.row.note||'')}<br>${esc(p.err)}<br>
     <button class=link data-act=pdel data-i=${i}>刪除這筆</button></div>`).join('');
   if(error)return $('#v').innerHTML=`<h2>明細</h2>${pend}<p>${esc(error.message)}</p>`;
-  const rows=data.map(r=>{
+  S.rows=data;const rows=data.map(r=>{
     const tr=r.type=='轉帳',cls=tr?'t':r.type=='收'?'i':'e';
     const title=tr?`${nm(S.acc,r.from_account_id)} → ${nm(S.acc,r.to_account_id)}`:nm(S.items,r.item_id);
     const amt=tr?`${n2(r.from_amount,2)} ${r.currency}`:`${r.type=='收'?'+':'−'}${n2(r.amount,2)} ${r.currency}`;
-    return `<div class=item data-act=del data-id="${r.id}"><div>${esc(title)}<br><small>${r.tx_date}${tr?'':'・'+esc(nm(S.acc,r.account_id))}${r.note?'・'+esc(r.note):''}</small></div>
+    return `<div class=item data-act=edit data-id="${r.id}"><div>${esc(title)}<br><small>${r.tx_date}${tr?'':'・'+esc(nm(S.acc,r.account_id))}${r.note?'・'+esc(r.note):''}</small></div>
       <div class="amt ${cls}">${amt}${r.fee>0?`<br><small>手續費 ${n2(r.fee,2)}</small>`:''}</div></div>`}).join('');
-  $('#v').innerHTML=`<h2>明細</h2>${pend}${rows||'<p class=sub>還沒有記錄。到「記帳」新增第一筆。</p>'}<p class=sub>點一筆可刪除。</p>`;
+  $('#v').innerHTML=`<h2>明細</h2>${pend}${rows||'<p class=sub>還沒有記錄。到「記帳」新增第一筆。</p>'}<p class=sub>點一筆可修改或刪除。</p>`;
 }
 async function delTx(id){
   if(!confirm('刪除這筆記錄？'))return;
@@ -206,6 +214,45 @@ async function vMon(){
   <p class=sub>台幣金額依交易當天或之前最近的匯率換算；轉帳不計入收支，手續費計入支出。</p>`;
 }
 
+const ENT={
+ accounts:{t:'帳戶',pre:'A',k:'acc',lock:['currency'],def:{kind:'銀行帳戶',currency:'TWD',opening_balance:0,include_in_assets:true,active:true},
+  f:[['name','名稱','text'],['kind','類型',['現金','銀行帳戶','電子支付','信用卡']],['currency','幣別（如 TWD；建立後不能改）','text'],['institution','銀行／機構','text'],['opening_balance','期初餘額','num'],['statement_day','結帳日（信用卡）','num'],['due_day','繳款日（信用卡）','num'],['include_in_assets','列入資產','chk'],['active','啟用','chk']]},
+ items:{t:'項目',pre:'I',k:'items',lock:['type'],def:{type:'支',active:true},
+  f:[['name','名稱','text'],['type','收支（建立後不能改）',['收','支']],['group_name','大分類','text'],['active','啟用','chk']]},
+ trips:{t:'旅遊',pre:'T',k:'trips',lock:[],def:{active:true},
+  f:[['name','名稱','text'],['start_date','開始日期','date'],['end_date','結束日期','date'],['currency','主要幣別','text'],['active','啟用','chk']]}
+};
+function vSet(){
+  $('#v').innerHTML='<h2>設定</h2>'+Object.entries(ENT).map(([e,c])=>`<div style="display:flex;justify-content:space-between;align-items:center;margin-top:14px"><b>${c.t}</b><button class=link data-act=entnew data-e=${e}>＋新增</button></div>`
+    +S[c.k].map(r=>`<div class=item data-act=ent data-e=${e} data-id="${esc(r.id)}"><div>${esc(r.name)}${r.active?'':' <small>（已停用）</small>'}<br><small>${e=='accounts'?esc(r.kind)+'・'+r.currency:e=='items'?r.type+'・'+esc(r.group_name):''}</small></div></div>`).join('')).join('')
+    +'<p style="margin-top:20px"><button class=link data-act=logout>登出</button></p>';
+}
+function vEnt(e,r){
+  const c=ENT[e],R={...(r||c.def)},isNew=!r;
+  $('#v').innerHTML=`<h2>${isNew?'新增':'修改'}${c.t}</h2>`+c.f.map(([k,l,ty])=>{
+    const v=R[k]??'',d=!isNew&&c.lock.includes(k)?' disabled':'';
+    if(ty=='chk')return `<label class=chk><input type=checkbox id=f_${k}${v?' checked':''}>${l}</label>`;
+    if(Array.isArray(ty))return `<label>${l}<select id=f_${k}${d}>${ty.map(o=>`<option${o==v?' selected':''}>${o}</option>`).join('')}</select></label>`;
+    return `<label>${l}<input id=f_${k}${d} ${ty=='num'?'inputmode=decimal':ty=='date'?'type=date':''} value="${esc(v)}"></label>`}).join('')
+    +'<button class=btn data-act=entsave>儲存</button><button class="btn sec" data-act=entcancel>取消</button>';
+  S.ent={e,id:r?.id};
+}
+async function entSave(){
+  const {e}=S.ent,c=ENT[e],p={};let id=S.ent.id;
+  for(const [k,,ty] of c.f){const el=$('#f_'+k);p[k]=ty=='chk'?el.checked:ty=='num'?(el.value===''?null:num(el.value)):(el.value.trim()||null)}
+  if(!p.name)return toast('請填寫名稱');
+  if(p.currency){p.currency=p.currency.toUpperCase();if(!/^[A-Z]{3}$/.test(p.currency))return toast('幣別請填 3 個英文字母，例如 TWD')}
+  if(e=='accounts'&&p.opening_balance==null)p.opening_balance=0;
+  let error;
+  if(id){c.lock.forEach(k=>delete p[k]);({error}=await sb.from(e).update(p).eq('id',id))}
+  else{
+    id=c.pre+String(Math.max(0,...S[c.k].map(x=>+String(x.id).replace(/\D/g,'')||0))+1).padStart(3,'0');
+    if(e!='trips')p.sort_order=Math.max(0,...S[c.k].map(x=>x.sort_order||0))+10;
+    ({error}=await sb.from(e).insert({id,...p}));
+  }
+  if(error)return toast('未儲存：'+error.message);
+  await master();toast('已儲存');S.ent=null;vSet();
+}
 const acts={
   async login(){
     $('#lm').textContent='登入中…';
@@ -213,11 +260,19 @@ const acts={
     if(error)return login('登入失敗：'+error.message);
     S.user=data.user;await master();flush();render();
   },
-  tab(b){S.tab=b.dataset.k;render()},
+  tab(b){S.edit=null;S.tab=b.dataset.k;render()},
   type(b){S.type=b.dataset.k;vAdd()},
   save,
   del(b){delTx(b.dataset.id)},
-  pdel(b){S.pend.splice(+b.dataset.i,1);ls('pend',S.pend);vList()}
+  pdel(b){S.pend.splice(+b.dataset.i,1);ls('pend',S.pend);vList()},
+  edit(b){S.edit=S.rows.find(r=>r.id==b.dataset.id);S.tab='add';render()},
+  cancel(){S.edit=null;S.tab='list';render()},
+  delx(){const id=S.edit.id;S.edit=null;S.tab='list';render();delTx(id)},
+  ent(b){const e=b.dataset.e;vEnt(e,S[ENT[e].k].find(r=>r.id==b.dataset.id))},
+  entnew(b){vEnt(b.dataset.e)},
+  entsave:entSave,
+  entcancel(){vSet()},
+  async logout(){await sb.auth.signOut();S.user=null;login()}
 };
 document.addEventListener('click',e=>{const b=e.target.closest('[data-act]');if(b)acts[b.dataset.act]?.(b)});
 document.addEventListener('change',e=>{if(e.target.id=='mm'&&e.target.value){S.month=e.target.value;vMon()}});
