@@ -162,8 +162,8 @@ function txAmt(t) {
     const fc = acur(t.from_account_id), tc = acur(t.to_account_id);
     return '<span class="t">' + mc(t.from_amount, fc) + (fc !== tc ? ' → ' + mc(t.to_amount, tc) : '') + '</span>';
   }
-  const c = acur(t.account_id), s = t.type === '支' ? -1 : 1;
-  return '<span class="' + (s < 0 ? 'e' : 'i') + '">' + mc(s * num(t.amount), c) + '</span>' + (c !== 'TWD' && t.twd_amount ? '<br><small>≈ ' + money(s * num(t.twd_amount)) + '</small>' : '');
+  const c = acur(t.account_id), s = t.type === '支' ? -1 : 1, v = s * num(t.amount);
+  return '<span class="' + (v < 0 ? 'e' : 'i') + '">' + mc(v, c) + '</span>' + (c !== 'TWD' && t.twd_amount ? '<br><small>≈ ' + money(s * num(t.twd_amount)) + '</small>' : '');
 }
 function txRow(t, pending) {
   const title = t.type === '轉帳' ? an(t.from_account_id) + ' → ' + an(t.to_account_id) : (itemName(t.item_id) || (t.type === '支' ? '支出' : '收入'));
@@ -174,7 +174,7 @@ function txRow(t, pending) {
 
 /* ---------- 記帳表單 ---------- */
 function newTf(type) {
-  return { type: type || '支', date: todayStr(), amount: '', account: store.get('lastAcct', ''), item: '', trip: '', fee: '', note: '', from: store.get('lastAcct', ''), fromAmt: '', to: '', toAmt: '', editId: null };
+  return { type: type || '支', date: todayStr(), amount: '', account: store.get('lastAcct', ''), item: '', trip: '', fee: '', note: '', refund: false, from: store.get('lastAcct', ''), fromAmt: '', to: '', toAmt: '', editId: null };
 }
 function acctOptions(sel, filter) {
   let h = '<option value="">請選擇</option>';
@@ -202,6 +202,7 @@ function addView() {
     h += '<label>金額' + (acur(f.account) !== 'TWD' ? '（' + acur(f.account) + '）' : '') + '<input class="big" data-t="amount" inputmode="decimal" placeholder="0" value="' + esc(f.amount) + '"></label>';
     h += '<label>帳戶<select data-t="account">' + acctOptions(f.account) + '</select></label>';
     h += '<label>項目<select data-t="item">' + itemOptions(f.type, f.item) + '</select></label>';
+    if (f.type === '支') h += '<label class="chk"><input type="checkbox" data-t="refund"' + (f.refund ? ' checked' : '') + '>這是退款／回饋（記成負的支出，抵掉這個分類的花費）</label>';
   } else {
     h += '<div class="row"><label>轉出帳戶<select data-t="from">' + acctOptions(f.from) + '</select></label><label>轉出金額' + (acur(f.from) !== 'TWD' ? '（' + acur(f.from) + '）' : '') + '<input data-t="fromAmt" inputmode="decimal" value="' + esc(f.fromAmt) + '"></label></div>';
     h += '<div class="row"><label>轉入帳戶<select data-t="to">' + acctOptions(f.to) + '</select></label><label>轉入金額' + (acur(f.to) !== 'TWD' ? '（' + acur(f.to) + '）' : '') + '<input data-t="toAmt" inputmode="decimal" value="' + esc(f.toAmt) + '"></label></div>';
@@ -224,10 +225,10 @@ async function saveTx() {
     if (!(fa > 0) || !(ta > 0)) return toast('請輸入轉出與轉入金額');
     row = { type: '轉帳', account_id: null, amount: null, item_id: null, trip_id: null, from_account_id: f.from, from_amount: fa, to_account_id: f.to, to_amount: ta };
   } else {
-    if (!(n(f.amount) > 0)) return toast('請輸入金額');
+    if (!(Math.abs(n(f.amount)) > 0)) return toast('請輸入金額');
     if (!f.account) return toast('請選擇帳戶');
     if (!f.item) return toast('請選擇項目');
-    row = { type: f.type, account_id: f.account, amount: n(f.amount), item_id: f.item, trip_id: f.trip || null, from_account_id: null, from_amount: null, to_account_id: null, to_amount: null };
+    row = { type: f.type, account_id: f.account, amount: (f.type === '支' && f.refund ? -1 : 1) * Math.abs(n(f.amount)), item_id: f.item, trip_id: f.trip || null, from_account_id: null, from_amount: null, to_account_id: null, to_amount: null };
   }
   if (!f.date) return toast('請選擇日期');
   Object.assign(row, { tx_date: f.date, fee: n(f.fee) || 0, note: f.note || null, fx_rate: null });
@@ -708,7 +709,7 @@ const ACT = {
   },
   async quickDel(d) { if (!confirm('刪除這個常用交易？')) return; const { error } = await sb.from('quick_entries').delete().eq('id', d.id); if (error) return toast(error.message); await load(); render(); },
   quickMove(d) { return moveRows('quick_entries', S.quick, d.id, Number(d.d)); },
-  tfType(d) { S.tf.type = d.v; S.tf.item = ''; render(); },
+  tfType(d) { S.tf.type = d.v; S.tf.item = ''; S.tf.refund = false; render(); },
   saveTx, cancelTx() { S.tf = newTf(); S.page = 'list'; render(); loadTxs().then(render); },
   async delTx() {
     if (!confirm('確定刪除這筆交易？')) return;
@@ -718,7 +719,7 @@ const ACT = {
   editTx(d) {
     const t = S.txs.find(x => x.id === d.id) || S.recent.find(x => x.id === d.id); if (!t) return;
     const s = x => (x == null ? '' : String(x));
-    S.tf = { editId: t.id, type: t.type, date: t.tx_date, amount: s(t.amount), account: t.account_id || '', item: t.item_id || '', trip: t.trip_id || '', fee: num(t.fee) ? s(t.fee) : '', note: t.note || '', from: t.from_account_id || '', fromAmt: s(t.from_amount), to: t.to_account_id || '', toAmt: s(t.to_amount) };
+    S.tf = { editId: t.id, type: t.type, date: t.tx_date, amount: s(Math.abs(num(t.amount)) || ''), refund: t.type === '支' && num(t.amount) < 0, account: t.account_id || '', item: t.item_id || '', trip: t.trip_id || '', fee: num(t.fee) ? s(t.fee) : '', note: t.note || '', from: t.from_account_id || '', fromAmt: s(t.from_amount), to: t.to_account_id || '', toAmt: s(t.to_amount) };
     S.page = 'add'; render(); window.scrollTo(0, 0);
   },
   mon(d) { S.txMonth = addMonth(S.txMonth, Number(d.d)); loadTxs().then(render); },
@@ -761,7 +762,7 @@ document.addEventListener('click', e => {
 });
 function onField(e) {
   const el = e.target;
-  if (el.dataset.t) { S.tf[el.dataset.t] = el.value; if (e.type === 'change' && el.tagName === 'SELECT') { if (el.dataset.t === 'account' || el.dataset.t === 'from' || el.dataset.t === 'to') render(); } return; }
+  if (el.dataset.t) { S.tf[el.dataset.t] = el.type === 'checkbox' ? el.checked : el.value; if (e.type === 'change' && el.tagName === 'SELECT') { if (el.dataset.t === 'account' || el.dataset.t === 'from' || el.dataset.t === 'to') render(); } return; }
   if (el.dataset.f && S.form) { S.form.v[el.dataset.f] = el.type === 'checkbox' ? el.checked : el.value; if (S.form.kind === 'card') previewCard(); return; }
   if (el.id === 'txm' && el.value) { S.txMonth = el.value; loadTxs().then(render); }
   if (el.id === 'txq') { S.q = el.value; render(); }
